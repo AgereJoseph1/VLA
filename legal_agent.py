@@ -298,12 +298,23 @@ async def health_check():
     """Simple health check endpoint"""
     return {"status": "healthy", "timestamp": time.time()}
 
-@app.post("/upload_legal_document")
+@app.post(
+    "/upload_legal_document",
+    description="""
+    Extract specific fields from a document.
+    
+    - Upload a document (PDF, JPG, JPEG, PNG)
+    - Specify which fields to extract as a comma-separated list
+    - The API will extract only those fields and return N/A for missing information
+    
+    Example fields: signatories, dates, organizations, contract_value, payment_terms, etc.
+    """
+)
 async def upload_legal_document(
-    fields: str = Form(..., description="Comma-separated list of fields to extract"),
-    file_content: str = Form(..., description="SharePoint file URL from Power Automate")
+    file: UploadFile = File(...),
+    fields: str = Form(..., description="Comma-separated list of fields to extract (e.g., 'signatories,dates,organizations')")
 ):
-    """Extract specific entities from legal documents from SharePoint via Power Automate"""
+    """Extract specific entities from a legal documents"""
     try:
         # Parse the fields to extract
         fields_to_extract = [field.strip() for field in fields.split(',')]
@@ -313,48 +324,21 @@ async def upload_legal_document(
                 status_code=400,
                 content={"error": "No fields specified for extraction"}
             )
-        
-        # Verify the file_content is a URL
-        if not file_content.startswith('http://') and not file_content.startswith('https://'):
+            
+        # Get the file extension
+        file_extension = file.filename.split('.')[-1].lower()
+        file_content = await file.read()
+
+        # Validate file size (10MB limit)
+        if len(file_content) > 10 * 1024 * 1024:
             return JSONResponse(
                 status_code=400,
-                content={"error": "Invalid file URL provided. URL must start with http:// or https://"}
+                content={"error": "File too large. Maximum size is 10MB."}
             )
-            
-        print(f"Processing SharePoint file URL: {file_content[:100]}")
-        
-        try:
-            # Download file from the URL
-            response = requests.get(file_content, timeout=60)
-            response.raise_for_status()
-            file_content_bytes = response.content
-            
-            # Determine file extension from content-type
-            content_type = response.headers.get('content-type', '')
-            if 'application/pdf' in content_type:
-                file_extension = 'pdf'
-            elif 'image/jpeg' in content_type or 'image/jpg' in content_type:
-                file_extension = 'jpg'
-            elif 'image/png' in content_type:
-                file_extension = 'png'
-            else:
-                # Try to get extension from URL
-                file_extension = file_content.split('?')[0].split('.')[-1].lower()
-                # Default to PDF if extension is not recognized
-                if file_extension not in ['pdf', 'jpg', 'jpeg', 'png']:
-                    file_extension = 'pdf'
-                    
-            print(f"Detected file extension: {file_extension}")
-        except Exception as e:
-            print(f"Error downloading file: {str(e)}")
-            return JSONResponse(
-                status_code=400,
-                content={"error": f"Failed to download file: {str(e)}"}
-            )
-        
+
         # Create a temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_extension}") as temp_file:
-            temp_file.write(file_content_bytes)
+            temp_file.write(file_content)
             temp_path = temp_file.name
 
         try:
@@ -382,31 +366,38 @@ async def upload_legal_document(
                 )
             
             # Extract the specified fields with N/A handling
-            extracted_json = extract_custom_entities(text, fields_to_extract)
-            
-            # Parse the JSON response
             try:
-                response_data = json.loads(extracted_json)
+                extracted_json = extract_custom_entities(text, fields_to_extract)
                 
-                # Normalize response to ensure consistent formatting
-                response_data = normalize_response(response_data)
-                return response_data
-                
-            except json.JSONDecodeError:
-                # Try to extract just the JSON part from the text
-                import re
-                json_match = re.search(r'({[\s\S]*})', extracted_json)
-                if json_match:
-                    try:
-                        response_data = json.loads(json_match.group(1))
-                        response_data = normalize_response(response_data)
-                        return response_data
-                    except:
-                        pass
-                
+                # Parse the JSON response
+                try:
+                    response_data = json.loads(extracted_json)
+                    
+                    # Normalize response to ensure consistent formatting
+                    response_data = normalize_response(response_data)
+                    return response_data
+                    
+                except json.JSONDecodeError:
+                    # Try to extract just the JSON part from the text
+                    import re
+                    json_match = re.search(r'({[\s\S]*})', extracted_json)
+                    if json_match:
+                        try:
+                            response_data = json.loads(json_match.group(1))
+                            response_data = normalize_response(response_data)
+                            return response_data
+                        except:
+                            pass
+                    
+                    return JSONResponse(
+                        status_code=500,
+                        content={"error": "Failed to parse the AI response into valid JSON. Please try again."}
+                    )
+            
+            except Exception as e:
                 return JSONResponse(
                     status_code=500,
-                    content={"error": "Failed to parse the AI response into valid JSON. Please try again."}
+                    content={"error": f"AI processing error: {str(e)}"}
                 )
 
         except Exception as e:
@@ -420,11 +411,8 @@ async def upload_legal_document(
             )
 
     except Exception as e:
-        import traceback
-        traceback_str = traceback.format_exc()
-        print(f"Exception: {str(e)}")
-        print(f"Traceback: {traceback_str}")
         return JSONResponse(
             status_code=500,
             content={"error": f"Upload error: {str(e)}"}
         )
+
