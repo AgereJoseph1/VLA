@@ -416,6 +416,3 @@ async def upload_legal_document(
             content={"error": f"Upload error: {str(e)}"}
         )
 
-# Resolve route conflict by renaming endpoints
-app.router.routes[-1].path = "/extract_entities/"
-app.router.routes[-1].name = "extract_entities"
