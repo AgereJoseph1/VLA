@@ -375,7 +375,8 @@ async def upload_legal_document(
                     
                     # Normalize response to ensure consistent formatting
                     response_data = normalize_response(response_data)
-                    return response_data
+                    # Wrap the response in a Results object
+                    return {"Results": response_data}
                     
                 except json.JSONDecodeError:
                     # Try to extract just the JSON part from the text
@@ -385,7 +386,8 @@ async def upload_legal_document(
                         try:
                             response_data = json.loads(json_match.group(1))
                             response_data = normalize_response(response_data)
-                            return response_data
+                            # Wrap the response in a Results object
+                            return {"Results": response_data}
                         except:
                             pass
                     
