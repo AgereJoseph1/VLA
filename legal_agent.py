@@ -293,6 +293,56 @@ def extract_custom_entities(text: str, fields_to_extract: List[str]):
         print(f"OpenAI API error: {str(e)}")
         raise
 
+def format_results_as_text(data: dict) -> str:
+    """Convert extracted data into a human-readable text format"""
+    output = []
+    
+    # Handle document type if present
+    if "document_type" in data:
+        output.append(f"Document Type: {data['document_type']}")
+    
+    # Handle signatories
+    if "signatories" in data:
+        output.append("\nSignatories:")
+        if not data["signatories"]:
+            output.append("- None found")
+        else:
+            for sig in data["signatories"]:
+                output.append(f"- {sig['name']} ({sig['title']})")
+    
+    # Handle dates
+    if "dates" in data:
+        output.append("\nImportant Dates:")
+        if not data["dates"]:
+            output.append("- None found")
+        else:
+            for date_info in data["dates"]:
+                output.append(f"- {date_info['purpose']}: {date_info['date']}")
+    
+    # Handle organizations
+    if "organizations" in data:
+        output.append("\nOrganizations:")
+        if not data["organizations"]:
+            output.append("- None found")
+        else:
+            for org in data["organizations"]:
+                output.append(f"- {org}")
+    
+    # Handle any custom fields
+    for key, value in data.items():
+        if key not in ["document_type", "signatories", "dates", "organizations"]:
+            output.append(f"\n{key.title()}:")
+            if isinstance(value, list):
+                if not value:
+                    output.append("- None found")
+                else:
+                    for item in value:
+                        output.append(f"- {item}")
+            else:
+                output.append(f"- {value}")
+    
+    return "\n".join(output)
+
 @app.get("/health")
 async def health_check():
     """Simple health check endpoint"""
@@ -312,7 +362,7 @@ async def health_check():
 )
 async def upload_legal_document(
     file: UploadFile = File(...),
-    fields: str = Form(..., description="Comma-separated list of fields to extract (e.g., 'signatories,dates,organizations')")
+    fields: str = Form(..., description="Comma-separated list of fields to extract")
 ):
     """Extract specific entities from a legal documents"""
     try:
@@ -369,14 +419,12 @@ async def upload_legal_document(
             try:
                 extracted_json = extract_custom_entities(text, fields_to_extract)
                 
-                # Parse the JSON response
                 try:
                     response_data = json.loads(extracted_json)
-                    
-                    # Normalize response to ensure consistent formatting
                     response_data = normalize_response(response_data)
-                    # Wrap the response in a Results object
-                    return {"Results": response_data}
+                    formatted_text = format_results_as_text(response_data)
+                    # Keep the Results wrapper
+                    return {"Results": formatted_text}
                     
                 except json.JSONDecodeError:
                     # Try to extract just the JSON part from the text
@@ -386,8 +434,9 @@ async def upload_legal_document(
                         try:
                             response_data = json.loads(json_match.group(1))
                             response_data = normalize_response(response_data)
-                            # Wrap the response in a Results object
-                            return {"Results": response_data}
+                            formatted_text = format_results_as_text(response_data)
+                            # Keep the Results wrapper
+                            return {"Results": formatted_text}
                         except:
                             pass
                     
