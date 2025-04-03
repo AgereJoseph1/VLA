@@ -53,6 +53,10 @@ class ExtractedEntities(BaseModel):
     dates: List[DateInfo]
     organizations: List[str]
 
+class FileContentRequest(BaseModel):
+    content: str
+    fields: str
+
 # Functions for text extraction
 def extract_text_from_pdf(file_path: str) -> str:
     """Extract text from PDF file using a file path"""
@@ -465,5 +469,78 @@ async def upload_legal_document(
         return JSONResponse(
             status_code=500,
             content={"error": f"Upload error: {str(e)}"}
+        )
+
+@app.post(
+    "/extract_from_content",
+    description="""
+    Extract specific fields from document content provided by Power Automate.
+    
+    - Provide the document content as text
+    - Specify which fields to extract as a comma-separated list
+    - The API will extract only those fields and return N/A for missing information
+    
+    Example fields: signatories, dates, organizations, contract_value, payment_terms, etc.
+    """
+)
+async def extract_from_content(request: FileContentRequest):
+    """Extract specific entities from document content provided by Power Automate"""
+    try:
+        # Parse the fields to extract
+        fields_to_extract = [field.strip() for field in request.fields.split(',')]
+        
+        if not fields_to_extract:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "No fields specified for extraction"}
+            )
+            
+        # Check if content is empty
+        if not request.content or request.content.strip() == "":
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Document content is empty"}
+            )
+        
+        # Extract the specified fields with N/A handling
+        try:
+            extracted_json = extract_custom_entities(request.content, fields_to_extract)
+            
+            try:
+                response_data = json.loads(extracted_json)
+                response_data = normalize_response(response_data)
+                formatted_text = format_results_as_text(response_data)
+                # Keep the Results wrapper
+                return {"Results": formatted_text}
+                
+            except json.JSONDecodeError:
+                # Try to extract just the JSON part from the text
+                import re
+                json_match = re.search(r'({[\s\S]*})', extracted_json)
+                if json_match:
+                    try:
+                        response_data = json.loads(json_match.group(1))
+                        response_data = normalize_response(response_data)
+                        formatted_text = format_results_as_text(response_data)
+                        # Keep the Results wrapper
+                        return {"Results": formatted_text}
+                    except:
+                        pass
+            
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "Failed to parse the AI response into valid JSON. Please try again."}
+                )
+        
+        except Exception as e:
+            return JSONResponse(
+                status_code=500,
+                content={"error": f"AI processing error: {str(e)}"}
+            )
+
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Processing error: {str(e)}"}
         )
 
