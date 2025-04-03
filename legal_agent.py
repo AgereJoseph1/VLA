@@ -54,7 +54,7 @@ class ExtractedEntities(BaseModel):
     organizations: List[str]
 
 class FileContentRequest(BaseModel):
-    content: str
+    content: str  # base64 encoded content
     fields: str
 
 # Functions for text extraction
@@ -476,7 +476,7 @@ async def upload_legal_document(
     description="""
     Extract specific fields from document content provided by Power Automate.
     
-    - Provide the document content as text
+    - Provide the document content as base64 encoded text
     - Specify which fields to extract as a comma-separated list
     - The API will extract only those fields and return N/A for missing information
     
@@ -501,10 +501,20 @@ async def extract_from_content(request: FileContentRequest):
                 status_code=400,
                 content={"error": "Document content is empty"}
             )
+            
+        try:
+            # Decode base64 content
+            import base64
+            decoded_content = base64.b64decode(request.content).decode('utf-8')
+        except Exception as e:
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Failed to decode base64 content: {str(e)}"}
+            )
         
         # Extract the specified fields with N/A handling
         try:
-            extracted_json = extract_custom_entities(request.content, fields_to_extract)
+            extracted_json = extract_custom_entities(decoded_content, fields_to_extract)
             
             try:
                 response_data = json.loads(extracted_json)
@@ -526,7 +536,7 @@ async def extract_from_content(request: FileContentRequest):
                         return {"Results": formatted_text}
                     except:
                         pass
-            
+                
                 return JSONResponse(
                     status_code=500,
                     content={"error": "Failed to parse the AI response into valid JSON. Please try again."}
